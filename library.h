@@ -1,6 +1,11 @@
 #ifndef SOKOBAN_LIBRARY_H
 #define SOKOBAN_LIBRARY_H
 
-void hello();
+
+class sokoban{
+    int gridH, gridW,numBox;
+
+};
+
 
 #endif
