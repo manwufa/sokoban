@@ -8,17 +8,9 @@
 #include<set>
 #include <algorithm>
 #include <assert.h>
-#include <opencv2/opencv.hpp>
+#include "library.h"
 using namespace std;
-#define GRID_W 8
-#define GRID_H 8
-#define GRID_WH (GRID_W*GRID_H)
-#define RW_STEP (((GRID_W+2)+(GRID_H+2))*1.5)
-#define IS_INSIDE(x,y) ((x)>=0&&(x)<GRID_W&&(y)>=0&&(y)<GRID_H)
-#define MAX_NUM_BOX 7
-#define MAX_POSITION 10000000
-#define DEPTH_PRIOR 300
-typedef unsigned long long stateType;
+
 void GenRoom(char* grid) {
     int patenX[5][4] = { { -1,0,1,0 },{ 0,0,0,0 },{ -1,0,-1,0 },{ -1,0,0,0 },{ 1,0,0,0 } };
     int patenY[5][4] = { { 0,0,0,0 },{ -1,0,1,0 },{ 0,0,1,1 },{ 0,0,0,1 },{ 0,0,0,1 } };
@@ -45,20 +37,7 @@ void GenRoom(char* grid) {
         else {	direct = rand() % 4;}
     }
 }
-inline stateType encodeState(unsigned char* boxPos, unsigned char playerPos, int numBox) {
 
-    stateType ret = 0;
-    for (int i = 0; i < numBox; i++) { ret = (ret + boxPos[i]) << 8; }
-    return ret + playerPos;
-}
-inline void decodeState(stateType* ps,unsigned char* boxPos, unsigned char* playerPos, int numBox) {
-    stateType s = *ps;
-    *playerPos = s & 0xff;
-    for (int i = numBox-1; i >=0; i--) {
-        s = s >> 8;
-        boxPos[i]= s & 0xff;
-    }
-}
 inline int stateDist(stateType* ps1, stateType* ps2, int numBox) {
     unsigned char boxPos1[MAX_NUM_BOX], playerPos1;
     unsigned char boxPos2[MAX_NUM_BOX], playerPos2;
@@ -134,16 +113,7 @@ stateType placeTargetPlayer(char* grid,int numBox) {
     return encodeState(boxPos, playerPos, numBox);
 }
 
-struct C_posNode {
-    stateType state;
-    int edge[8];//-1 not expand,-2 not allowed
-    int fullExpanded;
-    int step;
-    int swap;
-    int score;
-    int curBoxPos;
-    C_posNode() :fullExpanded(0), step(0), swap(1000), score(0), curBoxPos(-1){ for (int i = 0; i < 8; i++) { edge[i] = -1; } }
-};
+
 //void checkExpandable(char* grid, stateType* state, int numBox,int* act) {
 //	unsigned char boxPos[MAX_NUM_BOX], playerPos;
 //	decodeState(state, boxPos, &playerPos, numBox);
@@ -531,140 +501,76 @@ int sokoban(char* grid, stateType* goal, stateType* s0,int numBox, vector<C_posN
     return 0;
 
 }
-void play(char* grid, stateType* goal, stateType* s0,int numBox, vector<C_posNode>& path) {
-#define SZ_PER_GRID 80
-    IplImage* img = cvCreateImage(cvSize(GRID_W, GRID_H), 8, 3);
-    IplImage* imgB = cvCreateImage(cvSize(GRID_W*SZ_PER_GRID, GRID_H*SZ_PER_GRID), 8, 3);
-    int si =0;
-    while (1) {
-        for (int h = 0; h < img->height; h++) {
-            uchar* pdata = (uchar*)img->imageData + h*img->widthStep;
-            for (int w = 0; w < img->width; w++) {
-                int pos = h*GRID_W + w;
-                if (grid[pos] == 0) {
-                    pdata[w * 3] = 64;
-                    pdata[w * 3 + 1] = 64;
-                    pdata[w * 3 + 2] = 64;
-                }
-                else {
-                    pdata[w * 3] = 255;
-                    pdata[w * 3 + 1] = 128;
-                    pdata[w * 3 + 2] = 128;
-                }
 
-            }
+void floatGrid2char(char* grid, stateType* s, int numBox,float* gridf,float* boxf,float* playerPosf){
+    if(gridf){for(int i=0;i<GRID_WH;i++){gridf[i]=grid[i];}}
+    unsigned char boxPos[MAX_NUM_BOX],playerPos;
+    decodeState(s,boxPos, &playerPos, numBox);
+    memset(boxf,0,GRID_WH*sizeof(float));
+    memset(playerPosf,0,GRID_WH*sizeof(float));
+    for(int i=0;i<numBox;i++){boxf[boxPos[i]]=1;}
+    playerPosf[playerPos]=1;
+
+}
+extern "C" {
+int py_sokoban(float *gridf, float *box0, float *box1, float *playerPos0, float *playerPos1, int numBox, int seed) {
+    srand(seed);
+    char grid[GRID_WH];
+    GenRoom(grid);
+    stateType goal, s0;
+    goal = placeTargetPlayer(grid, numBox);
+    vector<C_posNode> path;
+    reverseWalk(grid, &goal, numBox, &s0, path, 0);
+    floatGrid2char(grid, &s0, numBox, gridf, box0, playerPos0);
+    floatGrid2char(grid, &goal, numBox, 0, box1, playerPos1);
+}
+void py_move(float *gridf, float *boxf, float *playerPosf, float *boxf2, float *playerPosf2, int action) {
+    int ox = 0, oy = 0;
+    if (action == 0) {
+        ox = -1;
+        oy = 0;
+    }
+    else if (action == 1) {
+        ox = 1;
+        oy = 0;
+    }
+    else if (action == 2) {
+        ox = 0;
+        oy = 1;
+    }
+    else if (action == 3) {
+        ox = 0;
+        oy = -1;
+    }
+    int pX, pY;
+    for (int pXY = 0; pX < GRID_WH; pXY++) {
+        if (playerPosf[pXY] > 0) {
+            pX = pXY % GRID_W;
+            pY = pXY / GRID_W;
+            break;
         }
-        unsigned char boxPos[MAX_NUM_BOX], playerPos;
-        unsigned char boxPos2[MAX_NUM_BOX];
-        decodeState(goal, boxPos, &playerPos, numBox);
-        decodeState(s0, boxPos2, &playerPos, numBox);
-        int rightPos = 0;
-
-        for (int i = 0; i < numBox; i++) {
-            int rp = 0;
-            for (int j = 0; j < numBox; j++) {
-                if (boxPos2[i] == boxPos[j]) {
-                    rightPos++;
-                    rp++;
-                }
-            }
-            int posH = boxPos2[i] / GRID_W;
-            int posW = boxPos2[i] % GRID_W;
-            uchar* pdata = (uchar*)img->imageData+posH*img->widthStep;
-            if (rp == 0) {
-                pdata[posW * 3] = 0;
-                pdata[posW * 3 + 1] = 192;
-                pdata[posW * 3 + 2] = 192;
-            }
-            else {
-                pdata[posW * 3] = 0;
-                pdata[posW * 3 + 1] = 192;
-                pdata[posW * 3 + 2] = 0;
-            }
-        }
-
-        cvResize(img, imgB, 0);
-        cvDrawCircle(imgB, cvPoint((playerPos% GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 2), (playerPos/ GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 2)), SZ_PER_GRID / 3 ,cvScalar(128,0,128), -1);
-        for (int i = 0; i < numBox; i++) {
-            cvDrawLine(imgB, cvPoint((boxPos[i] % GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 4), (boxPos[i] / GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 2)),
-                       cvPoint((boxPos[i] % GRID_W)*SZ_PER_GRID + (SZ_PER_GRID * 3 / 4), (boxPos[i] / GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 2)), cvScalar(0, 0, 128), 2);
-            cvDrawLine(imgB, cvPoint((boxPos[i] % GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 2), (boxPos[i] / GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 4)),
-                       cvPoint((boxPos[i] % GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 2), (boxPos[i] / GRID_W)*SZ_PER_GRID + (SZ_PER_GRID *3 / 4)), cvScalar(0, 0, 128), 2);
-            //cvDrawCircle(imgB, cvPoint((boxPos[i] % GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 2), (boxPos[i] / GRID_W)*SZ_PER_GRID + (SZ_PER_GRID / 2)), SZ_PER_GRID / 6, cvScalar(0, 0, 128), 2);
+    }
+    memcpy(boxf2, boxf, GRID_WH * sizeof(float));
+    memcpy(playerPosf2, playerPosf, GRID_WH * sizeof(float));
+#define POS(x, y) ((x)+(y)*GRID_W)
+    if (IS_INSIDE(pX + ox, pY + oy) && gridf[POS(pX + ox, pY + oy)] == 1) {
+        if (boxf[POS(pX + ox, pY + oy)] == 0) {
+            playerPosf2[POS(pX, pY)] = 0;
+            playerPosf2[POS(pX + ox, pY + oy)] = 1;
+        } else if (IS_INSIDE(pX + ox * 2, pY + oy * 2) && gridf[POS(pX + ox * 2, pY + oy * 2)] == 1 &&
+                   boxf[POS(pX + ox * 2, pY + oy * 2)] == 0) {
+            playerPosf2[POS(pX, pY)] = 0;
+            playerPosf2[POS(pX + ox, pY + oy)] = 1;
+            boxf2[POS(pX + ox, pY + oy)] = 0;
+            boxf2[POS(pX + ox * 2, pY + oy * 2)] = 1;
 
         }
-
-        cvShowImage("gridWorld", imgB);
-        char a=cvWaitKey();
-
-
-        int pX = playerPos%GRID_W, pY = playerPos / GRID_W;
-		int offset[4] = { -1,1,-GRID_W,GRID_W };
-
-#define POS(x,y) ((x)+(y)*GRID_W)
-		int ox = 0, oy = 0;
-		if (a == 'a') { ox = -1; oy = 0; }
-		else if (a == 'd') { ox = 1; oy = 0; }
-		else if (a == 's') { ox = 0; oy = 1; }
-		else if (a == 'w') { ox = 0; oy = -1; }
-		else if (a == ' ') { break; }
-		else if (a == 'r') { *s0=path[0].state; continue;}
-        else if (a == 'h') {
-            *s0 = path[si].state;
-            si=(si+1)% path.size();
-            printf("\n %d  %d", path[si].swap,path[si].score);
-            continue;
-        }
-		else { continue; }
-		if (IS_INSIDE(pX +ox, pY+oy)&& grid[POS(pX + ox, pY + oy)]==1) {
-			int movable = 1;
-			for (int i = 0; i < numBox; i++) {
-				if (boxPos2[i] == POS(pX + ox, pY + oy)) {
-					if (IS_INSIDE(pX + ox*2, pY + oy*2) && grid[POS(pX + ox * 2, pY + oy * 2)] == 1) {
-						for (int i = 0; i < numBox; i++) {
-							if (boxPos2[i] == POS(pX + ox * 2, pY + oy * 2)) {
-								movable = 0;
-							}
-						}
-						if (movable == 1) { boxPos2[i] = POS(pX + ox * 2, pY + oy * 2); }
-					}else{ movable = 0; }
-				}
-			}
-			if (movable == 1) {
-				playerPos = POS(pX + ox, pY + oy);
-			}
-		}
-		sort(boxPos2, boxPos2 + numBox);
-		*s0= encodeState(boxPos2, playerPos, numBox);
-        //break;
     }
 
-    cvReleaseImage(&img);
-    cvReleaseImage(&imgB);
-
+}
 }
 
 
-
-int main() {
-    for (int i = 0; i < 20000; i++) {
-        srand(i+1);
-        char grid[GRID_WH];
-        stateType goal, s0;
-        vector<C_posNode> path;
-        char fn[260];
-        sprintf(fn, "C:\\work\\mcgill\\sokoban\\level\\%d.bin", i);
-        sokoban(grid, &goal, &s0, 6, path,fn);
-        if (path.size() > 50) {
-            play(grid, &goal, &s0, 6, path);
-        }else{
-            printf("pass");
-        }
-
-    }
-
-    system("pause");
-}
 
 //
 //int main() {
