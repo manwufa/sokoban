@@ -780,7 +780,7 @@ int py_move_batch(float* inbuff,float* outbuff,float *validA,int* a,float* right
 #include<pthread.h>
 void* genLevel(void* _id){
     int id=*(int*)_id;
-    srand(id);
+    srand(id+1);
     for(int i1=0;i1<1000;i1++){
         char fn[260];
         sprintf(fn, "/home/wf/sokobanlv/%d_%d.bin", id,i1);
@@ -794,6 +794,7 @@ void* genLevel(void* _id){
                 GenRoom(grid);
                 goal = placeTargetPlayer(grid, 4);
                 reverseWalk(grid, &goal, 4, &s0, path, 0);
+                printf("retry_%d_%d\n",id,i1*1000+i2);
             }
             printf("%d_%d\n",id,i1*1000+i2);
             fwrite(grid,1,GRID_WH,f);
