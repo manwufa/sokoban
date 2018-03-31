@@ -10,20 +10,37 @@
 #include <assert.h>
 #include "library.h"
 using namespace std;
+#define MAXTHREAD 128
+#define PRNG_BUFSZ 32
+struct random_data rand_states[MAXTHREAD];
+char rand_statebufs[MAXTHREAD][PRNG_BUFSZ];
+int mysrand(int i){
+    memset(&(rand_states[i]),0,sizeof(struct random_data));
+    memset(&(rand_statebufs[i][0]),0,PRNG_BUFSZ);
+    initstate_r(i+100, &(rand_statebufs[i][0]), PRNG_BUFSZ, &rand_states[i]);
+}
+int myrand(int i){
+    int ret;
+    random_r(&(rand_states[i]), &ret);
+    return ret;
+}
 
-void GenRoom(char* grid) {
+
+
+void GenRoom(char* grid,int thread) {
     int patenX[5][4] = { { -1,0,1,0 },{ 0,0,0,0 },{ -1,0,-1,0 },{ -1,0,0,0 },{ 1,0,0,0 } };
     int patenY[5][4] = { { 0,0,0,0 },{ -1,0,1,0 },{ 0,0,1,1 },{ 0,0,0,1 },{ 0,0,0,1 } };
     memset(grid, 0, GRID_WH);
-    int CurPosX = rand() % GRID_W;
-    int CurPosY = rand() % GRID_H;
-    int direct = rand() % 4;
+    int CurPosX = myrand(thread) % GRID_W;
+    int CurPosY = myrand(thread) % GRID_H;
+    int direct = myrand(thread) % 4;
     int step = 0;
-    while (step < RW_STEP) {
+    int totalroom=0;
+    while (step < RW_STEP||totalroom<15) {
         int next_x = CurPosX + (direct == 0 ? -1 : (direct == 2 ? 1 : 0));
         int next_y = CurPosY + (direct == 1 ? -1 : (direct == 3 ? 1 : 0));
         if (IS_INSIDE(next_x, next_y)) {
-            int pt = rand() % 5;
+            int pt = myrand(thread) % 5;
             for (int p = 0; p < 4; p++) {
                 int px = CurPosX + patenX[pt][p];
                 int py = CurPosY + patenY[pt][p];
@@ -31,10 +48,12 @@ void GenRoom(char* grid) {
             }
             CurPosX = next_x;
             CurPosY = next_y;
-            if (rand() % 100<35) { direct = rand() % 4; }
+            if (myrand(thread) % 100<35) { direct = myrand(thread) % 4; }
             step++;
         }
-        else {	direct = rand() % 4;}
+        else {	direct = myrand(thread) % 4;}
+        totalroom=0;
+        for(int  i=0;i<GRID_WH;i++){totalroom+=grid[i];}
     }
 }
 
@@ -94,12 +113,12 @@ inline int boxToMove(stateType* ps, int numBox, int action) {
     return playerPos - offset[action - 4];
 }
 
-stateType placeTargetPlayer(char* grid,int numBox) {
+stateType placeTargetPlayer(char* grid,int numBox,int thread) {
     unsigned char boxPos[MAX_NUM_BOX],playerPos;
     for (int b = 0; b < numBox+1; b++) {
         int done = 0;
         while (done == 0) {
-            int pos = rand() % GRID_WH;
+            int pos = myrand(thread) % GRID_WH;
             if (grid[pos] == 1) {
                 (b < numBox ? boxPos[b] : playerPos) = pos;
                 done = 1;
@@ -463,6 +482,7 @@ int reverseWalk(char* grid, stateType* goal, int numBox, stateType* s0, vector<C
         }
         int curIdx = idx;
         while (curIdx != -1) {
+            if(path.size()>10000)printf("err");
             path.push_back(sNode[curIdx]);
             curIdx = prevStateIdx[curIdx];
         }
@@ -494,8 +514,8 @@ int reverseWalk(char* grid, stateType* goal, int numBox, stateType* s0, vector<C
     return 0;
 }
 int sokoban(char* grid, stateType* goal, stateType* s0,int numBox, vector<C_posNode>& path,char* fn) {
-    GenRoom(grid);
-    *goal=placeTargetPlayer(grid, numBox);
+    GenRoom(grid,0);
+    *goal=placeTargetPlayer(grid, numBox,0);
     reverseWalk(grid, goal, numBox,s0, path,fn);
 
     return 0;
@@ -522,14 +542,14 @@ int py_sokoban(float *gridf, float *box0, float *box1, float *playerPos0, float 
     srand(seed);
     while(path.size()<10) {
         path.clear();
-        GenRoom(grid);
-        goal = placeTargetPlayer(grid, numBox);
+        GenRoom(grid,0);
+        goal = placeTargetPlayer(grid, numBox,0);
         reverseWalk(grid, &goal, numBox, &s0, path, 0);
     }
     floatGrid2char(grid, &s0, numBox, gridf, box0, playerPos0);
     floatGrid2char(grid, &goal, numBox, 0, box1, playerPos1);
 
-    for (pXY = 0; pX < GRID_WH; pXY++) {
+    for (pXY = 0; pXY < GRID_WH; pXY++) {
         if (playerPos0[pXY] > 0) {
             pX = pXY % GRID_W;
             pY = pXY / GRID_W;
@@ -672,8 +692,8 @@ int py_newgame_batch(float* outbuff,float *validA,float* rightBox,float* updateT
 
         while (path.size() < 10) {
             path.clear();
-            GenRoom(grid);
-            goal = placeTargetPlayer(grid, numBox);
+            GenRoom(grid,0);
+            goal = placeTargetPlayer(grid, numBox,0);
             reverseWalk(grid, &goal, numBox, &s0, path, 0);
         }
         for (int i = 0; i < GRID_WH; i++) { cur_outbuff[i * 4] = grid[i]; }
@@ -780,21 +800,20 @@ int py_move_batch(float* inbuff,float* outbuff,float *validA,int* a,float* right
 #include<pthread.h>
 void* genLevel(void* _id){
     int id=*(int*)_id;
-    srand(id+1);
+    mysrand(id);
     for(int i1=0;i1<1000;i1++){
         char fn[260];
         sprintf(fn, "/home/wf/sokobanlv/%d_%d.bin", id,i1);
-        FILE* f=fopen(fn,"w");
+        FILE* f=fopen(fn,"wb");
         for(int i2=0;i2<1000;i2++){
             char grid[GRID_WH];
             stateType goal, s0;
             vector<C_posNode> path;
             while (path.size() < 10) {
                 path.clear();
-                GenRoom(grid);
-                goal = placeTargetPlayer(grid, 4);
+                GenRoom(grid,id);
+                goal = placeTargetPlayer(grid, 4,id);
                 reverseWalk(grid, &goal, 4, &s0, path, 0);
-                printf("retry_%d_%d\n",id,i1*1000+i2);
             }
             printf("%d_%d\n",id,i1*1000+i2);
             fwrite(grid,1,GRID_WH,f);
