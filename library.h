@@ -4,7 +4,7 @@
 #define GRID_W 8
 #define GRID_H 8
 #define GRID_WH (GRID_W*GRID_H)
-#define RW_STEP (((GRID_W+2)+(GRID_H+2))*1.5)
+#define RW_STEP (((GRID_W+2)+(GRID_H+2))*0.5)
 #define IS_INSIDE(x,y) ((x)>=0&&(x)<GRID_W&&(y)>=0&&(y)<GRID_H)
 #define MAX_NUM_BOX 7
 #define MAX_POSITION 10000000

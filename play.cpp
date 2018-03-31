@@ -119,22 +119,24 @@ void play(char* grid, stateType* goal, stateType* s0,int numBox, vector<C_posNod
 }
 
 
-int main() {
-    for (int i = 0; i < 20000; i++) {
-        srand(i+1);
-        char grid[GRID_WH];
-        stateType goal, s0;
-        vector<C_posNode> path;
-        char fn[260];
-        sprintf(fn, "C:\\work\\mcgill\\sokoban\\level\\%d.bin", i);
-        sokoban(grid, &goal, &s0, 4, path,fn);
-        if (path.size() > 50) {
-            play(grid, &goal, &s0, 4, path);
-        }else{
-            printf("pass");
-        }
-
-    }
-
-    system("pause");
-}
+//int main() {
+//    srand(10);
+//    for (int i = 0; i < 200000; i++) {
+//
+//        char grid[GRID_WH];
+//        stateType goal, s0;
+//        vector<C_posNode> path;
+//        char fn[260];
+//        sprintf(fn, "C:\\work\\mcgill\\sokoban\\level\\%d.bin", i);
+//        sokoban(grid, &goal, &s0, 4, path,fn);
+//        play(grid, &goal, &s0, 4, path);
+//        if (path.size() > 50) {
+//
+//        }else{
+//            printf("pass");
+//        }
+//
+//    }
+//
+//    system("pause");
+//}
