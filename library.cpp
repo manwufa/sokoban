@@ -680,36 +680,72 @@ int testplayerpos=0;
 //
 //    }
 //}
-int py_newgame_batch(float* outbuff,float *validA,float* rightBox,float* updateTag,int batchSize,int numBox,int* seed){
+//int py_newgame_batch(float* outbuff,float *validA,float* rightBox,float* updateTag,int batchSize,int numBox,int* seed){
+//    for(int b=0;b<batchSize;b++){
+//        if(updateTag[b]==0){continue;}
+//        float* cur_outbuff=outbuff+b*GRID_WH*4;
+//        memset(cur_outbuff,0,4*GRID_WH*sizeof(float));
+//        int ox = 0, oy = 0,pXY=0, pX, pY;
+//        vector<C_posNode> path;
+//        char grid[GRID_WH];
+//        stateType goal, s0;
+//
+//        while (path.size() < 10) {
+//            path.clear();
+//            GenRoom(grid,0);
+//            goal = placeTargetPlayer(grid, numBox,0);
+//            reverseWalk(grid, &goal, numBox, &s0, path, 0);
+//        }
+//        for (int i = 0; i < GRID_WH; i++) { cur_outbuff[i * 4] = grid[i]; }
+//        unsigned char boxPos[MAX_NUM_BOX], playerPos,playerPos2;
+//        decodeState(&s0, boxPos, &playerPos, numBox);
+//        for (int i = 0; i < numBox; i++) { cur_outbuff[boxPos[i] * 4 + 1] = 1; }
+//        cur_outbuff[playerPos * 4 + 3] = 1;
+//        decodeState(&goal, boxPos, &playerPos2, numBox);
+//        for (int i = 0; i < numBox; i++) { cur_outbuff[boxPos[i] * 4 + 2] = 1; }
+//
+//        pX = playerPos % GRID_W;
+//        pY = playerPos / GRID_W;
+//        memcpy(testroom, outbuff, 4*GRID_WH * sizeof(float));
+//        testplayerpos=playerPos;
+//        testtag=1;
+//
+//        for(int ii=0;ii<4;ii++) {
+//            ox = 0; oy = 0;
+//            if (ii == 0) { ox = -1;}
+//            else if (ii == 1) {ox = 1;}
+//            else if (ii == 2) {oy = 1;}
+//            else if (ii == 3) {oy = -1;}
+//            validA[b*4+ii] = ((IS_INSIDE(pX + ox, pY + oy) && cur_outbuff[POS(pX + ox, pY + oy)*4] == 1)&&
+//                              (cur_outbuff[POS(pX + ox, pY + oy)*4+1] == 0||(IS_INSIDE(pX + ox * 2, pY + oy * 2) &&
+//                                                                             cur_outbuff[POS(pX + ox * 2, pY + oy * 2)*4] == 1 &&
+//                                                                             cur_outbuff[POS(pX + ox * 2, pY + oy * 2)*4+1] == 0))) ;
+//        }
+//        if(validA[b*4]+validA[b*4+1]+validA[b*4+2]+validA[b*4+3]==0){printf("err in cccc");}
+//
+//        rightBox[b] = 0;
+//        for (pXY = 0; pXY < GRID_WH; pXY++) {
+//            if (cur_outbuff[pXY*4+1] == 1&& cur_outbuff[pXY*4+2] == 1) {
+//                rightBox[b]++;
+//            }
+//        }
+//        if(rightBox[b]==4){printf("err in c");}
+//
+//    }
+//}
+int py_newgame_batch(float* outbuff,float *validA,float* rightBox,float* updateTag,int batchSize,int numBox){
+    int ox, oy,pXY, pX, pY;
+    float* cur_outbuff;
     for(int b=0;b<batchSize;b++){
         if(updateTag[b]==0){continue;}
-        float* cur_outbuff=outbuff+b*GRID_WH*4;
-        memset(cur_outbuff,0,4*GRID_WH*sizeof(float));
-        int ox = 0, oy = 0,pXY=0, pX, pY;
-        vector<C_posNode> path;
-        char grid[GRID_WH];
-        stateType goal, s0;
-
-        while (path.size() < 10) {
-            path.clear();
-            GenRoom(grid,0);
-            goal = placeTargetPlayer(grid, numBox,0);
-            reverseWalk(grid, &goal, numBox, &s0, path, 0);
+        cur_outbuff=outbuff+b*GRID_WH*4;
+        for (pXY = 0; pXY < GRID_WH; pXY++) {
+            if (cur_outbuff[pXY*4+3] == 1) {
+                pX = pXY % GRID_W;
+                pY = pXY / GRID_W;
+                break;
+            }
         }
-        for (int i = 0; i < GRID_WH; i++) { cur_outbuff[i * 4] = grid[i]; }
-        unsigned char boxPos[MAX_NUM_BOX], playerPos,playerPos2;
-        decodeState(&s0, boxPos, &playerPos, numBox);
-        for (int i = 0; i < numBox; i++) { cur_outbuff[boxPos[i] * 4 + 1] = 1; }
-        cur_outbuff[playerPos * 4 + 3] = 1;
-        decodeState(&goal, boxPos, &playerPos2, numBox);
-        for (int i = 0; i < numBox; i++) { cur_outbuff[boxPos[i] * 4 + 2] = 1; }
-
-        pX = playerPos % GRID_W;
-        pY = playerPos / GRID_W;
-        memcpy(testroom, outbuff, 4*GRID_WH * sizeof(float));
-        testplayerpos=playerPos;
-        testtag=1;
-
         for(int ii=0;ii<4;ii++) {
             ox = 0; oy = 0;
             if (ii == 0) { ox = -1;}
@@ -721,18 +757,15 @@ int py_newgame_batch(float* outbuff,float *validA,float* rightBox,float* updateT
                                                                              cur_outbuff[POS(pX + ox * 2, pY + oy * 2)*4] == 1 &&
                                                                              cur_outbuff[POS(pX + ox * 2, pY + oy * 2)*4+1] == 0))) ;
         }
-        if(validA[b*4]+validA[b*4+1]+validA[b*4+2]+validA[b*4+3]==0){printf("err in cccc");}
-
         rightBox[b] = 0;
         for (pXY = 0; pXY < GRID_WH; pXY++) {
             if (cur_outbuff[pXY*4+1] == 1&& cur_outbuff[pXY*4+2] == 1) {
                 rightBox[b]++;
             }
         }
-        if(rightBox[b]==4){printf("err in c");}
-
     }
 }
+
 
 int py_move_batch(float* inbuff,float* outbuff,float *validA,int* a,float* rightBox,int batchSize){
     memcpy(outbuff, inbuff, 4*batchSize*GRID_WH * sizeof(float));
