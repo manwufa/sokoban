@@ -12,6 +12,7 @@
 using namespace std;
 #define MAXTHREAD 128
 #define PRNG_BUFSZ 32
+#define POS(x, y) ((x)+(y)*GRID_W)
 struct random_data rand_states[MAXTHREAD];
 char rand_statebufs[MAXTHREAD][PRNG_BUFSZ];
 int mysrand(int i){
@@ -90,6 +91,7 @@ inline void TransState(stateType* ps, int numBox,int action, stateType* pNextS) 
     sort(boxPos, boxPos + numBox);
     *pNextS = encodeState(boxPos, playerPos, numBox);
 }
+
 inline void TransOrderState(stateType* ps, int numBox, int action, stateType* pNextS) {
     stateType s = *ps;
     unsigned char boxPos[MAX_NUM_BOX], playerPos;
@@ -405,6 +407,203 @@ void checkExpandable(char* grid, stateType* state, int numBox, int* act) {
 //	delete[] sNode;
 //	return 0;
 //}
+void checkExpandableFWD(char* grid, stateType* state, int numBox, int* act){
+    unsigned char boxPos[MAX_NUM_BOX], playerPos;
+    decodeState(state, boxPos, &playerPos, numBox);
+    int pX = playerPos%GRID_W, pY = playerPos / GRID_W;
+    for (int i = 0; i < numBox; i++) { grid[boxPos[i]] = 2; }
+    for(int ii=0;ii<4;ii++) {
+        int ox = 0, oy = 0;
+        if (ii == 0) { ox = -1;}
+        else if (ii == 1) {ox = 1;}
+        else if (ii == 2) {oy = -1;}
+        else if (ii == 3) {oy = 1;}
+        act[ii] = (IS_INSIDE(pX + ox, pY + oy) && (grid[POS(pX + ox, pY + oy)] ==1 ||
+                                                   (grid[POS(pX + ox, pY + oy)] ==2&&IS_INSIDE(pX + ox * 2, pY + oy * 2)
+                                                    &&grid[POS(pX + ox * 2, pY + oy * 2)] == 1)));
+    }
+    for (int d = 0; d < 4; d++) { act[d] -= 2; }
+    for (int i = 0; i < numBox; i++) { grid[boxPos[i]] = 1; }
+}
+#define IS_INMASK(x) ((x)%GRID_W>=maskX&&(x)%GRID_W<maskX+width&&(x)/GRID_W>=maskY&&(x)/GRID_W<maskY+height)
+#define IS_INMASK1(x) ((x)%GRID_W>=maskX-1&&(x)%GRID_W<maskX+width+1&&(x)/GRID_W>=maskY-1&&(x)/GRID_W<maskY+height+1)
+inline void TransStateFWD(stateType* ps, int numBox,int action, stateType* pNextS,int maskX,int maskY,int width,int height) {
+    stateType s = *ps;
+    unsigned char boxPos[MAX_NUM_BOX], playerPos;
+    decodeState(ps, boxPos, &playerPos, numBox);
+    int offset[4] = { -1,1,-GRID_W,GRID_W };
+    playerPos += offset[action % 4];
+    for (int i = 0; i<numBox; i++) {
+        if (boxPos[i] == playerPos) {
+            boxPos[i] = playerPos+offset[action % 4];
+            break;
+        }
+    }
+    int nouseBoxPos=IS_INMASK1(0)?GRID_WH-1:0;
+    for(int i=0;i<numBox;i++){if(!IS_INMASK(boxPos[i])){boxPos[i]=nouseBoxPos;}}
+
+    sort(boxPos, boxPos + numBox);
+    *pNextS = encodeState(boxPos, playerPos, numBox);
+}
+struct CsubGoal{
+    unsigned char playerPos;
+    int gridState,boxPos,goalPos;
+    char border;
+    bool operator < (const CsubGoal& b) const{
+        if(gridState!=b.gridState){return gridState<b.gridState;}
+        else if(boxPos!=b.boxPos){return boxPos<b.boxPos;}
+        else if(goalPos!=b.goalPos){return goalPos<b.goalPos;}
+        else if(border!=b.border){return border<b.border;}
+        else if(playerPos!=b.playerPos){ return playerPos<b.playerPos;}
+        else {return false;}
+    }
+};
+map <CsubGoal, int> solvedstate[100];
+int mapsize=0;
+
+void saveState(){
+    FILE* f= fopen("/home/wf/sokobansubgoal/subgoal","wb");
+    for(int i=0;i<100;i++){
+        int len=solvedstate[i].size();
+        fwrite(&len,sizeof(int),1,f);
+        if(len>0){
+            for(auto it=solvedstate[i].begin();it!=solvedstate[i].end();it++){
+                fwrite(&(it->first),sizeof(CsubGoal),1,f);
+                fwrite(&(it->second),sizeof(int),1,f);
+            }
+        }
+    }
+    fclose(f);
+}
+void loadState(){
+    FILE* f= fopen("/home/wf/sokobansubgoal/subgoal","rb");
+    for(int i=0;i<100;i++){
+        int len;
+        fread(&len,sizeof(int),1,f);
+        if(len>0){
+            for(int j=0;j<len;j++){
+                CsubGoal tmp;
+                int a;
+                fread(&tmp,sizeof(CsubGoal),1,f);
+                fread(&a,sizeof(int),1,f);
+                solvedstate[i][tmp]=a;
+            }
+        }
+    }
+    fclose(f);
+}
+
+
+void encodeSubGoal(float* grid4,int maskX,int maskY,int width,int height,int numBox,CsubGoal* subgoal){
+    subgoal->border=(maskX>0)*8+(maskX<GRID_W-1)*4+(maskY>0)*2+(maskY<GRID_H-1);
+    int gridState=0,boxPos=0,goalPos=0;
+    int playerPos;
+    for(int i=0;i<GRID_WH;i++){if(grid4[i*4+3]>0){playerPos=i;}}
+    if(!IS_INMASK(playerPos)){
+        if(width==GRID_W){playerPos=GRID_WH+(playerPos/GRID_W<maskY);}
+        else if(height==GRID_H){playerPos=GRID_WH+(playerPos%GRID_W<maskX);}
+        else{playerPos=GRID_WH;}
+    }else{
+        playerPos=playerPos-maskY*GRID_W-maskX;
+    }
+    for(int i=0;i<width*height;i++){
+        int pXY=(i/width+maskY)*GRID_W+maskX+i%width;
+        gridState=(gridState<<1)+(grid4[pXY*4]>0);
+        boxPos=(boxPos<<1)+(grid4[pXY*4+1]>0);
+        goalPos=(goalPos<<1)+(grid4[pXY*4+2]>0);
+    }
+    subgoal->gridState=gridState;
+    subgoal->boxPos=boxPos;
+    subgoal->goalPos=goalPos;
+    subgoal->playerPos=playerPos;
+};
+
+
+int subStateSolvable(char* grid,stateType* goal,stateType* s0,int maskX,int maskY,int width,int height,int max_position,int numBox){
+    map <stateType, int> stateMap[2];	//map for check
+    C_posNode* sNode = new C_posNode[MAX_POSITION];
+    char newgrid[GRID_WH];
+
+    for(int i=0;i<GRID_WH;i++){
+        newgrid[i]=IS_INMASK(i)?grid[i]:(IS_INMASK1(i)?1:0);
+    }
+    unsigned char boxPos[7]={0},playerPos,boxGoal[7]={0};
+    decodeState(goal,boxGoal, &playerPos, numBox);
+    decodeState(s0,boxPos, &playerPos, numBox);
+    int nouseBoxPos=IS_INMASK1(0)?GRID_WH-1:0;
+    for(int i=0;i<numBox;i++){if(!IS_INMASK(boxPos[i])){boxPos[i]=nouseBoxPos;}}
+    if(!IS_INMASK1(playerPos)){
+        int px=playerPos%GRID_W,py=playerPos/GRID_W;
+
+        px=maskX>px?maskX-1:(maskX+width-1<px?maskX+width:px);
+        py=maskY>py?maskY-1:(maskY+height-1<py?maskY+height:py);
+        playerPos=px+GRID_W*py;
+    }
+    sort(boxPos, boxPos + numBox);
+    sNode[0].state = encodeState(boxPos,playerPos, numBox);
+    checkExpandableFWD(newgrid, &sNode[0].state, numBox, sNode[0].edge);
+    int head = 0, sNodeSz = 1,solvable=0,insideCount=0;
+    while (head < sNodeSz&& sNodeSz < MAX_POSITION&&insideCount<max_position&&solvable==0) {
+        if (sNodeSz % 100000 == 0) { printf("%d \n", stateMap[0].size()+ stateMap[1].size()); }
+        //width first expand tree
+        int mapid = (sNode[head].step + 1)%2;
+        for (int i = 0; i < 4; i++) {
+            if (sNodeSz == MAX_POSITION) { break; }
+            if (sNode[head].edge[i] == -1) {//unexpand action
+                stateType nextState;
+                TransStateFWD(&sNode[head].state, numBox, i, &nextState,maskX, maskY, width, height);
+                map<stateType, int>::iterator it = stateMap[mapid].find(nextState);
+                if (it == stateMap[mapid].end()) {
+                    stateMap[mapid][nextState] = sNodeSz;
+                    sNode[head].edge[i] = sNodeSz;
+                    sNode[sNodeSz].state = nextState;
+                    checkExpandableFWD(newgrid, &sNode[sNodeSz].state, numBox, sNode[sNodeSz].edge);
+                    sNode[sNodeSz].step = sNode[head].step + 1;
+                    sNodeSz++;
+                    decodeState(&nextState,boxPos, &playerPos, numBox);
+                    insideCount+=IS_INMASK(playerPos);
+                    solvable=1;
+                    for(int b1=0;b1<numBox;b1++){
+                        int solved=(boxPos[b1]==nouseBoxPos);
+                        for(int b2=0;b2<numBox;b2++){
+                            if(boxPos[b1]==boxGoal[b2]){solved=1;}
+                        }
+                        if(solved==0){solvable=0;}
+                    }
+                    if(solvable==1){break;}
+                }
+                else { sNode[head].edge[i] = it->second; }
+            }
+        }
+        head++;
+    }
+    if(head<sNodeSz){solvable=1;}
+//    if(solvable==0){
+//        printf("\n");
+//        decodeState(goal,boxGoal, &playerPos, numBox);
+//        decodeState(&sNode[0].state,boxPos, &playerPos, numBox);
+//        for(int i=0;i<numBox;i++){
+//            newgrid[boxPos[i]]=newgrid[boxPos[i]]|2;
+//            newgrid[boxGoal[i]]=newgrid[boxGoal[i]]|4;
+//        }
+//        for(int h=0;h<8;h++){
+//            for(int w=0;w<8;w++){
+//                int c=newgrid[h*GRID_W+w];
+//                printf(c==0?"M":(c==1?" ":(c==3?"O":(c==5?"+":(c==7?"G":"H")))));
+//            }
+//            printf("\n");
+//        }
+//        printf("%d",playerPos);
+//    }
+    delete[] sNode;
+    return solvable;
+}
+#undef IS_INMASK
+#undef IS_INMASK1
+//22 23 24 25 26 27 28 33 34 35 36 37 38 44 45 46
+
+
+
 int reverseWalk(char* grid, stateType* goal, int numBox, stateType* s0, vector<C_posNode>& path,char* fn) {
     map <stateType, int> stateMap[2];	//map for check
     C_posNode* sNode = new C_posNode[MAX_POSITION];
@@ -532,7 +731,8 @@ void floatGrid2char(char* grid, stateType* s, int numBox,float* gridf,float* box
     playerPosf[playerPos]=1;
 
 }
-#define POS(x, y) ((x)+(y)*GRID_W)
+
+
 extern "C" {
 int py_sokoban(float *gridf, float *box0, float *box1, float *playerPos0, float *playerPos1, float *nextAction,int numBox, int seed) {
     int ox = 0, oy = 0,pXY=0, pX, pY;
@@ -620,9 +820,7 @@ int py_move(float *gridf, float *boxf, float *playerPosf, float *boxf2, float *p
     return 0;
 }
 
-float testroom[4*GRID_WH];
-int testtag=0;
-int testplayerpos=0;
+
 //int py_newgame_batch(float* outbuff,float *validA,float* rightBox,float* updateTag,int batchSize,int numBox,int* seed){
 //    for(int b=0;b<batchSize;b++){
 //        if(updateTag[b]==0){continue;}
@@ -826,7 +1024,98 @@ int py_move_batch(float* inbuff,float* outbuff,float *validA,int* a,float* right
 }
 
 
+int py_subGoal_batch2(float* inbuff,int* maskX,int* maskY,int* width,int* height,int max_pos,int batchSize,int numBox,int* retPN){
+    for(int b=0;b<batchSize;b++){
+        //printf("%d",b);
+        float* cur_inbuff=inbuff+b*GRID_WH*4;
+        CsubGoal subgoal;
+        encodeSubGoal(cur_inbuff,maskX[b],maskY[b],width[b],height[b],numBox,&subgoal);
 
+        map<CsubGoal, int>::iterator it = solvedstate[width[b]*10+height[b]].find(subgoal);
+        if (it == solvedstate[width[b]*10+height[b]].end()) {
+            unsigned char playerPos,boxPos[7],boxgoal[7];
+            char grid[GRID_WH];
+            int i1=0,i2=0;
+            for(int i=0;i<GRID_WH;i++){
+                grid[i]=cur_inbuff[i*4];
+                if(cur_inbuff[i*4+1]>0){
+                    boxPos[i1]=i;
+                    i1++;
+                }
+                if(cur_inbuff[i*4+2]>0){
+                    boxgoal[i2]=i;
+                    i2++;
+                }
+                if(cur_inbuff[i*4+3]>0){playerPos=i;}
+            }
+            stateType s0=encodeState(boxPos,playerPos,numBox);
+            stateType goal=encodeState(boxgoal,playerPos,numBox);
+            int solveable=subStateSolvable(grid,&goal,&s0,maskX[b],maskY[b],width[b],height[b],max_pos,numBox);
+            solvedstate[width[b]*10+height[b]][subgoal]=solveable;
+            retPN[b]=solveable;
+            mapsize++;
+        }else{
+            retPN[b]=it->second;
+        }
+    }
+    return mapsize;
+}
+int py_subGoal_batch(float* inbuff,int* maskX,int* maskY,int* width,int* height,int max_pos,int batchSize,int numBox,int* retPN){
+    CsubGoal* subgoal=new CsubGoal[batchSize];
+    int isnew[1000]={0};
+#pragma omp parallel for
+    for(int b=0;b<batchSize;b++){
+        //printf("%d",b);
+        float* cur_inbuff=inbuff+b*GRID_WH*4;
+
+        encodeSubGoal(cur_inbuff,maskX[b],maskY[b],width[b],height[b],numBox,subgoal+b);
+
+        map<CsubGoal, int>::iterator it = solvedstate[width[b]*10+height[b]].find(subgoal[b]);
+        if (it == solvedstate[width[b]*10+height[b]].end()) {
+            unsigned char playerPos,boxPos[7],boxgoal[7];
+            char grid[GRID_WH];
+            int i1=0,i2=0;
+            for(int i=0;i<GRID_WH;i++){
+                grid[i]=cur_inbuff[i*4];
+                if(cur_inbuff[i*4+1]>0){
+                    boxPos[i1]=i;
+                    i1++;
+                }
+                if(cur_inbuff[i*4+2]>0){
+                    boxgoal[i2]=i;
+                    i2++;
+                }
+                if(cur_inbuff[i*4+3]>0){playerPos=i;}
+            }
+            stateType s0=encodeState(boxPos,playerPos,numBox);
+            stateType goal=encodeState(boxgoal,playerPos,numBox);
+            int solveable=subStateSolvable(grid,&goal,&s0,maskX[b],maskY[b],width[b],height[b],max_pos,numBox);
+            retPN[b]=solveable;
+            isnew[b]=1;
+
+        }else{
+            retPN[b]=it->second;
+        }
+    }
+    for(int b=0;b<batchSize;b++){
+        if(isnew[b]) {
+            solvedstate[width[b] * 10 + height[b]][subgoal[b]] = retPN[b];
+            mapsize++;
+            if(mapsize%500==0){
+                saveState();
+            }
+        }
+    }
+
+    delete[] subgoal;
+    return mapsize;
+}
+int py_loadState(){
+    loadState();
+    int sss=0;
+    for(int i=0;i<100;i++){sss+=solvedstate[i].size();}
+    return sss;
+}
 
 }
 
@@ -859,18 +1148,55 @@ void* genLevel(void* _id){
 }
 
 
-int main() {
-    pthread_t a,b,c,d;
-    int v0=0,v1=1,v2=2,v3=3;
-    pthread_create(&a, NULL, genLevel, &v0);
-    pthread_create(&b, NULL, genLevel, &v1);
-    pthread_create(&c, NULL, genLevel, &v2);
-    pthread_create(&d, NULL, genLevel, &v3);
-    pthread_join(a, NULL);
-    pthread_join(b, NULL);
-    pthread_join(c, NULL);
-    pthread_join(d, NULL);
+int main(){
+    float grid4[256]={0};
+    char grid[64]={ 0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,
+                    0,0,0,0,0,0,0,0,
+                    1,0,0,0,0,0,0,1,
+                    1,1,1,1,1,1,1,1,
+                    1,1,1,1,1,1,1,1};
+    for(int i=0;i<64;i++){
+        grid4[i*4]=grid[i];
+    }
+    int boxPos[4]={54,57,61,63};
+    int boxGoal[4]= {48,60,62,63};
+    for(int i=0;i<4;i++){
+        grid4[boxPos[i]*4+1]=1;
+        grid4[boxGoal[i]*4+2]=1;
+    }
+    grid4[55*4+3]=1;
+    loadState();
+    for(int maskX=0;maskX<7;maskX++){
+        for(int maskY=0;maskY<7;maskY++){
+            for(int width=2;width<8;width++){
+                for(int height=2;height<8;height++){
+                    if(width*height<25&&width+maskX<9&&height+maskY<9){
+                        int retPN=0;
+                        py_subGoal_batch(grid4,&maskX,&maskY,&width,&height,10000,1,4,&retPN);
+                        if(retPN==0){printf("err");}
+                    }
+                }
+            }
+        }
+    }
+
 }
+
+//int main() {
+//    pthread_t a,b,c,d;
+//    int v0=0,v1=1,v2=2,v3=3;
+//    pthread_create(&a, NULL, genLevel, &v0);
+//    pthread_create(&b, NULL, genLevel, &v1);
+//    pthread_create(&c, NULL, genLevel, &v2);
+//    pthread_create(&d, NULL, genLevel, &v3);
+//    pthread_join(a, NULL);
+//    pthread_join(b, NULL);
+//    pthread_join(c, NULL);
+//    pthread_join(d, NULL);
+//}
 //int main() {
 //	for (int i = 0; i < 10000; i++) {
 //		srand(i);
